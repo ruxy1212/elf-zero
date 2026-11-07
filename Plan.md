@@ -44,7 +44,9 @@
 
 1. **Backdoored Instruction + ELF Discriminator Extraction:** Attackers will not publish a new IDL for a malicious upgrade. Our Malicious v2 backdoors the *existing* `withdraw` instruction (removing the owner check when signed by the upgrade authority) AND our Sandbox includes an ELF byte-scanner that extracts 8-byte Anchor instruction discriminators directly from the `.rodata` section of the buffered binary to catch newly injected instructions.
 2. **Burner Buffer Evasion & Multisig Framing:** While a single-key attacker could write a buffer with an anonymous burner key and atomically transfer authority + upgrade in one transaction, institutional protocols use Squads multisigs or timelocks where the buffer pubkey must be staged on-chain prior to execution. ElfZero monitors both direct authority buffers and staged governance buffers, flagging instant-upgrade single-key authorities with a high baseline risk score.
-3. **Zero-Custody Scoped Exit:** The `emergency_withdraw` instruction on the Vault contract enforces in Rust constraints (`constraint = destination.owner == position.owner`) that the Guardian agent can *only* route funds back to the original depositor's wallet. Even a compromised agent key cannot steal funds.
+3. **Zero-Custody Scoped Exit:** The `emergency_withdraw` instruction on the Vault contract enforces in Rust constraints (`constraint = destination.key() == user_position.owner`) that the Guardian agent can *only* route funds back to the original depositor's wallet. Even a compromised agent key cannot steal funds.
+4. **WSL2 & Modern Toolchain Architecture:** Solana programs compile via `solana-cli 3.1.10 (Agave)` and `anchor-cli 1.2.1` inside WSL2 (Ubuntu). LiteSVM Node bindings run natively in Linux/WSL2 where precompiled N-API modules are supported, eliminating Windows MSVC native addon build barriers.
+5. **Pre-Staged / Fast Buffer Pipeline:** Writing 150KB+ to Devnet requires ~200+ chunked transactions. To keep the 1-click judge evaluation instant (< 5 seconds) without encountering Devnet RPC rate-limiting (`429`), the simulator supports pre-staged Devnet buffer activation while providing full live chunk streaming capability.
 
 ---
 
@@ -113,9 +115,14 @@ elfzero/
 ### Phase 1: Environment Setup & Devnet Keypair Provisioning
 
 * **Step 1.1: Initialize Workspace & Dependencies**
-1. Create the root directory `elfzero` and initialize an Anchor workspace (`anchor init elfzero_vault`).
-2. Create `backend/` (Node.js + TypeScript, `@solana/web3.js@^1.95.0`, `@coral-xyz/anchor`, `litesvm@^0.2.0`, `openai`, `ws`, `express`) and `frontend/` (React, Vite, TypeScript, Tailwind CSS, DaisyUI, `@solana/wallet-adapter-react`).
-
+1. Initialize Anchor workspace (`anchor init elfzero_vault`) inside WSL2 (`wsl -d Ubuntu`) using `solana-cli 3.1.10 (Agave)` and `anchor-cli 1.2.1`.
+2. Configure `backend/` dependencies aligning with modern standards from Day 99:
+   - `@anchor-lang/core: ^1.1.2`
+   - `@solana/web3.js: ^1.98.4`
+   - `litesvm: ^0.2.0` (runs in WSL2 Linux x86_64 environment)
+   - `openai: ^7.1.0`
+   - `express: ^4.21.0`, `ws: ^8.18.0`, `bn.js: ^5.2.5`
+3. Configure `frontend/` (React 19 / Vite or Next.js, TypeScript, Tailwind CSS, `@solana/wallet-adapter-react`, `@solana/wallet-adapter-react-ui`, `@anchor-lang/core`).
 
 * **Step 1.2: Generate Deterministic Role Keypairs**
 1. Generate three dedicated keypairs stored in `backend/.keys/` (gitignored, loaded via env/volume in production):
@@ -123,10 +130,7 @@ elfzero/
 * `guardian.json`: ElfZero autonomous agent keypair (authorized only for `emergency_withdraw`).
 * `demo_user.json`: Pre-funded depositor account so judges can test immediately without needing a Devnet faucet.
 
-
 2. Configure Solana CLI to Devnet (`https://api.devnet.solana.com`) and fund all three keypairs with Devnet SOL.
-
-
 
 ---
 
@@ -134,31 +138,61 @@ elfzero/
 
 > **CRITICAL AGENT RULE:** Do NOT rewrite and revert Rust source files between builds. Use Cargo feature flags (`#[cfg(feature = "...")]`) inside a single codebase so all three `.so` artifacts compile deterministically.
 
-* **Step 2.1: Configure Cargo Feature Flags in `programs/elfzero_vault/Cargo.toml**`
-1. Add the following features block to `programs/elfzero_vault/Cargo.toml`:
+* **Step 2.1: Configure Cargo Feature Flags & Size Optimization in `programs/elfzero_vault/Cargo.toml`**
+1. Add the following features block and profile optimizations to `programs/elfzero_vault/Cargo.toml`:
 ```toml
 [features]
-no-entrypoint = []
-no-idl = []
-no-log-ix-name = []
-cpi = ["no-entrypoint"]
 default = []
+cpi = ["no-entrypoint"]
+no-entrypoint = []
+no-log-ix-name = []
+idl-build = ["anchor-lang/idl-build"]
 benign-v2 = []
 malicious-v2 = []
 
+[profile.release]
+overflow-checks = true
+lto = "fat"
+codegen-units = 1
+opt-level = "z"
+strip = true
 ```
 
-
-
-
 * **Step 2.2: Implement State & Feature-Gated Instructions**
-1. In `programs/elfzero_vault/src/state.rs`, define `Vault` (tracks `authority: Pubkey`, `guardian: Pubkey`, `total_deposited: u64`, `bump: u8`) and `UserPosition` (tracks `owner: Pubkey`, `amount: u64`, `guardian: Pubkey`, `bump: u8`).
-2. Implement `initialize`, `deposit`, and `emergency_withdraw`. In `emergency_withdraw`, enforce strict account constraints:
-* `signer.key() == user_position.guardian`
-* `destination.key() == user_position.owner` (`has_one = owner`)
+1. In `programs/elfzero_vault/src/state.rs`, define:
+   - `Vault`: tracks `authority: Pubkey`, `guardian: Pubkey`, `total_deposited: u64`, `bump: u8`.
+   - `UserPosition`: tracks `owner: Pubkey`, `amount: u64`, `guardian: Pubkey`, `bump: u8`.
+2. Implement `initialize.rs`: creates `vault` PDA and sets `authority` and `guardian`.
+3. Implement `deposit.rs`: User signs and deposits lamports into the vault. Must use CPI to `system_program::transfer` with Anchor 1.x syntax:
+   ```rust
+   let cpi_ctx = CpiContext::new(
+       ctx.accounts.system_program.key(),
+       Transfer {
+           from: ctx.accounts.user.to_account_info(),
+           to: ctx.accounts.vault.to_account_info(),
+       },
+   );
+   transfer(cpi_ctx, amount)?;
+   position.amount = position.amount.checked_add(amount).unwrap();
+   vault.total_deposited = vault.total_deposited.checked_add(amount).unwrap();
+   ```
+4. Implement `emergency_exit.rs`: Guardian signs to rescue user funds. Enforces strict constraints:
+   - Signer is guardian: `require_keys_eq!(ctx.accounts.guardian.key(), user_position.guardian, VaultError::UnauthorizedGuardian);`
+   - Destination is original depositor: `require_keys_eq!(ctx.accounts.destination.key(), user_position.owner, VaultError::UnauthorizedDestination);`
+   - Lamport transfer respects rent floor:
+     ```rust
+     let amount = position.amount;
+     require!(amount > 0, VaultError::NoFundsToRescue);
+     let min_rent = Rent::get()?.minimum_balance(vault.to_account_info().data_len());
+     let vault_lamports = **vault.to_account_info().lamports.borrow();
+     require!(vault_lamports.saturating_sub(amount) >= min_rent, VaultError::RentViolation);
 
-
-3. In `programs/elfzero_vault/src/instructions/withdraw.rs`, implement feature-gated logic:
+     **vault.to_account_info().try_borrow_mut_lamports()? -= amount;
+     **ctx.accounts.destination.try_borrow_mut_lamports()? += amount;
+     position.amount = 0;
+     vault.total_deposited = vault.total_deposited.saturating_sub(amount);
+     ```
+5. In `programs/elfzero_vault/src/instructions/withdraw.rs`, implement feature-gated logic:
 ```rust
 pub fn handler(ctx: Context<Withdraw>, amount: u64) -> Result<()> {
     let vault = &mut ctx.accounts.vault;
@@ -195,38 +229,25 @@ pub fn handler(ctx: Context<Withdraw>, amount: u64) -> Result<()> {
     **ctx.accounts.signer.to_account_info().try_borrow_mut_lamports()? += amount;
     Ok(())
 }
-
 ```
 
-
-
-
-* **Step 2.3: Compile All Three `.so` Payloads Deterministically**
+* **Step 2.3: Compile All Three `.so` Payloads Deterministically (via WSL2)**
 1. Create the `payloads/` directory at the workspace root (`mkdir -p payloads`).
 2. **Build Clean v1:**
 ```bash
-anchor build
+wsl -d Ubuntu bash -l -c "anchor build"
 cp target/deploy/elfzero_vault.so payloads/vault_v1_clean.so
-
 ```
-
-
 3. **Build Benign v2 (via Cargo feature flag):**
 ```bash
-cargo build-sbf --manifest-path programs/elfzero_vault/Cargo.toml -- --features benign-v2
+wsl -d Ubuntu bash -l -c "cargo build-sbf --manifest-path programs/elfzero_vault/Cargo.toml -- --features benign-v2"
 cp target/deploy/elfzero_vault.so payloads/vault_v2_benign.so
-
 ```
-
-
 4. **Build Malicious v2 (via Cargo feature flag):**
 ```bash
-cargo build-sbf --manifest-path programs/elfzero_vault/Cargo.toml -- --features malicious-v2
+wsl -d Ubuntu bash -l -c "cargo build-sbf --manifest-path programs/elfzero_vault/Cargo.toml -- --features malicious-v2"
 cp target/deploy/elfzero_vault.so payloads/vault_v2_malicious.so
-
 ```
-
-
 5. Deploy `payloads/vault_v1_clean.so` to Devnet with `--upgrade-authority backend/.keys/authority.json` and record the `PROGRAM_ID`.
 
 
@@ -235,32 +256,39 @@ cp target/deploy/elfzero_vault.so payloads/vault_v2_malicious.so
 
 ### Phase 3: Watcher & ELF Binary Parser
 
-* **Step 3.1: Build `elfParser.ts**`
+* **Step 3.1: Build `elfParser.ts`**
 1. Implement `extractElfFromBuffer(bufferAccountData: Buffer): Uint8Array` which validates the `BPFLoaderUpgradeable` buffer discriminator (first 4 bytes = `[1, 0, 0, 0]`) and slices off the 37-byte header (4-byte enum + 1-byte Option tag + 32-byte authority pubkey):
 ```typescript
 export function extractElfFromBuffer(data: Buffer): Uint8Array {
   if (data.length <= 37 || data.readUInt32LE(0) !== 1) {
     throw new Error("Invalid BPFLoaderUpgradeable Buffer account");
   }
-  return new Uint8Array(data.subarray(37));
+  const elfBytes = new Uint8Array(data.subarray(37));
+  if (!isValidElf(elfBytes)) {
+    throw new Error("Incomplete or invalid ELF binary header in buffer");
+  }
+  return elfBytes;
 }
 
+export function isValidElf(bytes: Uint8Array): boolean {
+  return (
+    bytes.length >= 4 &&
+    bytes[0] === 0x7f &&
+    bytes[1] === 0x45 && // 'E'
+    bytes[2] === 0x4c && // 'L'
+    bytes[3] === 0x46    // 'F'
+  );
+}
 ```
-
 
 2. Implement `extractElfFromProgramData(programData: Buffer): Uint8Array` which validates the `ProgramData` discriminator (`readUInt32LE(0) === 3`) and slices off the 45-byte header (`data.subarray(45)`).
 3. Implement `scanAnchorDiscriminators(elfBytes: Uint8Array): string[]` to scan for standard 8-byte SHA256(`global:<ix_name>`) instruction preambles and report binary size / section diffs between v1 and v2.
 
-
-* **Step 3.2: Build `bufferWatcher.ts**`
-1. Poll `connection.getProgramAccounts(BPF_LOADER_UPGRADEABLE_ID)` using two `memcmp` filters:
+* **Step 3.2: Build `bufferWatcher.ts`**
+1. Poll `connection.getProgramAccounts(BPF_LOADER_UPGRADEABLE_ID)` using `memcmp` filters:
 * Byte offset `0`: `bs58.encode(Buffer.from([1, 0, 0, 0]))` (Account type = Buffer).
 * Byte offset `5`: `authorityPubkey.toBase58()` (Buffer authority matches monitored program's upgrade authority).
-
-
-2. Track seen buffer pubkeys and SHA-256 byte hashes in memory. When a new or updated buffer finishes writing, emit `StagedBufferDetected` with `{ programId, bufferPubkey, liveElfBytes, stagedElfBytes }`.
-
-
+2. Filter out incomplete or empty buffers using `isValidElf`. Track seen buffer pubkeys and SHA-256 byte hashes in memory. When a new or updated buffer finishes writing, emit `StagedBufferDetected` with `{ programId, bufferPubkey, liveElfBytes, stagedElfBytes }`.
 
 ---
 
@@ -268,14 +296,11 @@ export function extractElfFromBuffer(data: Buffer): Uint8Array {
 
 > **CRITICAL AGENT RULE:** Use the exact `litesvm` Node.js API signatures shown in Step 4.2 (`new LiteSVM()`, `svm.addProgram(Pubkey, Uint8Array)`, `svm.setAccount(Pubkey, AccountInfoBytes)`, `svm.latestBlockhash()`, `svm.sendTransaction(tx)`, `svm.getBalance(Pubkey)`, and `instanceof FailedTransactionMetadata`). Do NOT invent async wrappers or non-existent methods.
 
-* **Step 4.1: Build `scenarioBuilder.ts**`
-1. Construct an array of deterministic unsigned test transactions (`Transaction[]`) paired with their required signers (`Keypair[]`):
+* **Step 4.1: Build `scenarioBuilder.ts`**
+1. Construct deterministic unsigned test transactions using `@anchor-lang/core` Borsh instruction coder / standard 8-byte Anchor discriminators:
 * **Scenario 1 (`USER_DEPOSIT`):** Signed by `demoUser`, calls `deposit(1_000_000_000)` (1 SOL).
 * **Scenario 2 (`USER_WITHDRAW`):** Signed by `demoUser`, calls `withdraw(500_000_000)` (0.5 SOL).
 * **Scenario 3 (`AUTHORITY_DRAIN_PROBE`):** Signed by `authority` (the upgrade authority), passes `vault` and `userPosition` accounts into `withdraw(500_000_000)` where `signer = authority.publicKey`.
-
-
-
 
 * **Step 4.2: Build `litesvmRunner.ts` (Exact `litesvm` Signatures)**
 1. Fetch the live `vault` and `userPosition` account states from Devnet RPC (`connection.getMultipleAccountsInfo([vaultPda, userPositionPda])`).
@@ -371,52 +396,42 @@ export function runSingleSvmInstance(
 
   return results;
 }
-
 ```
-
 
 3. Call `runSingleSvmInstance` twice: once with `liveElfBytes` (`svmOld`) and once with `stagedElfBytes` (`svmNew`), returning both `ScenarioDelta[]` arrays to the Invariant Judge.
 
-
-* **Step 4.3: Build `invariantEngine.ts**`
+* **Step 4.3: Build `invariantEngine.ts`**
 1. Evaluate the core invariant across every scenario transaction:
 
 $$\Delta \text{Balance}_{\text{New}}(\text{Authority}) > 0 \quad \text{AND} \quad \Delta \text{Balance}_{\text{New}}(\text{Vault}) < 0 \quad \text{AND} \quad \Delta \text{Balance}_{\text{Old}}(\text{Authority}) \le 0$$
-
 
 2. Assign graded severity:
 * `INFO`: Identical balance deltas across all scenarios (e.g., `vault_v2_benign.so`).
 * `WARN`: Instruction failure/success codes or logs changed without unauthorized fund drainage.
 * `CRITICAL`: `authorityDeltaLamports > 0n` and `vaultDeltaLamports < 0n` in `svmNew` while failing/0 in `svmOld` (e.g., `AUTHORITY_DRAIN_PROBE` in `vault_v2_malicious.so`).
 
-
-
-
 * **Step 4.4: Build `llmReporter.ts` (OpenAI SDK)**
 1. Initialize the official `openai` Node SDK (`new OpenAI({ apiKey: process.env.OPENAI_API_KEY })`).
 2. Pass the structured JSON output from `invariantEngine.ts` (scenario name, signer, old balance delta, new balance delta, ELF size diff) to `gpt-4o-mini` / `gpt-4o` to generate a concise, 2-sentence plain-English security advisory for the dashboard.
-
-
 
 ---
 
 ### Phase 5: Guardian Exit Executor & 1-Click Judge Simulator
 
-* **Step 5.1: Build `exitExecutor.ts**`
+* **Step 5.1: Build `exitExecutor.ts`**
 1. When `invariantEngine.ts` emits `CRITICAL`, immediately construct and sign the `emergency_withdraw` transaction using `guardian.json` with `commitment: "confirmed"` and priority fees enabled.
 2. Verify on-chain that the `vault` balance is drained back to the user and `demo_user` wallet balance increased by the protected deposit amount.
 3. Broadcast the Devnet transaction signature to the frontend via WebSocket.
 
-
-* **Step 5.2: Build `attackOrchestrator.ts` (1-Click Judge Self-Test API)**
-1. Expose three REST endpoints so judges can trigger real Devnet transactions with a single click in the browser UI (without writing code or using a CLI):
+* **Step 5.2: Build `attackOrchestrator.ts` (1-Click Fast Judge Simulator)**
+1. Expose three REST endpoints with dual-mode staging support (Pre-staged instant mode for seamless judge testing, plus live chunk streamer):
 * `POST /api/sim/seed-vault`: Uses `demo_user.json` to deposit `0.5 SOL` into the Devnet Vault so the vault is primed.
-* `POST /api/sim/stage-benign`: Writes `payloads/vault_v2_benign.so` into a real Devnet buffer owned by `authority.json` (or via in-process `BPFLoaderUpgradeable` buffer creation + write chunks), triggering the Watcher -> Sandbox -> `INFO` verdict.
+* `POST /api/sim/stage-benign`: Activates the staged benign buffer on Devnet, triggering Watcher -> LiteSVM Sandbox -> `INFO` verdict within 3 seconds.
 * `POST /api/sim/stage-malicious`:
-1. Ensures `0.5 SOL` is in the Vault.
-2. Writes `payloads/vault_v2_malicious.so` into a real Devnet buffer owned by `authority.json`.
-3. Waits 6 seconds (allowing the Watcher, LiteSVM Sandbox, and Guardian Exit to detect the buffer and rescue the funds on Devnet).
-4. Executes the upgrade and fires the attacker's drain transaction against the now-empty Vault, logging the post-rescue drain transaction signature.
+  1. Ensures `0.5 SOL` is in the Vault.
+  2. Activates the malicious v2 buffer on Devnet owned by `authority.json`.
+  3. Awaits the Guardian's on-chain rescue confirmation (verifying Vault balance drops to 0 SOL and user wallet recovers funds).
+  4. Once rescued, fires the attacker's upgrade and drain transaction against the drained Vault, proving on Devnet Explorer that the attacker was front-run and left with 0 SOL.
 
 
 
