@@ -5,10 +5,10 @@ resolution = true
 skip-lint = false
 
 [programs.localnet]
-elfzero_vault = "E1fZero111111111111111111111111111111111111"
+elfzero_vault = "D8r3d2uXQn9wYE96BRjyYqmqReFbziK5rfSwdYvHEtkT"
 
 [programs.devnet]
-elfzero_vault = "E1fZero111111111111111111111111111111111111"
+elfzero_vault = "D8r3d2uXQn9wYE96BRjyYqmqReFbziK5rfSwdYvHEtkT"
 
 [provider]
 cluster = "devnet"
