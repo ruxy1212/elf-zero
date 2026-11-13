@@ -2,7 +2,7 @@
 
 **Date:** November 13, 2026  
 **Branch:** `dev`  
-**Current Milestone:** Substep 4.1 Complete (LiteSVM In-Memory Program Loader & Account Cloner Verified)
+**Current Milestone:** Substep 4.2 Complete (Differential Invariant Engine Verified Across All 3 Binaries)
 
 ---
 
@@ -10,60 +10,56 @@
 
 ElfZero is an Autonomous Upgradability Guardian and Program-Level Rollback Engine on Solana. It continuously monitors program upgrade buffers on-chain, replicates the proposed ELF bytecode into an isolated local LiteSVM environment, executes differential invariant sweeps against pre-upgrade state snapshots, and automatically triggers non-custodial emergency exits (`emergency_exit`) if invariant violations or unauthorized drains are detected.
 
+**Phase 4 Progress:**
+- **Substep 4.1 (`8ab4b7d`):** In-Memory Program Loader & State Cloner (`backend/src/sandbox/litesvmRunner.ts` and `types.ts`).
+- **Substep 4.2:** Pre-Upgrade Scenario Matrix & Differential Invariant Engine (`backend/src/sandbox/invariantEngine.ts` and `test_invariantEngine.ts`).
+
 ---
 
-## 2. Work Completed in Substep 4.1
+## 2. Invariant Rules & Scenario Matrix (Substep 4.2)
 
-### Core Components Implemented
-- **`backend/src/sandbox/types.ts`:**
-  - `AccountSnapshot`: In-memory representation of accounts (address, lamports, owner, data Buffer, executable).
-  - `SandboxExecutionResult`: Structured output capturing success, CU consumed, logs, pre/post account state diffs, errors, and timing.
-  - `SandboxRunConfig`: Input parameters for program loading and state cloning.
-- **`backend/src/sandbox/litesvmRunner.ts`:**
-  - In-memory SBF bytecode loader using `LiteSVM.addProgram(programId, bytes)`.
-  - Account cloning from live RPC connections (`cloneFromRpc`, `cloneMultipleFromRpc`).
-  - Pre/post execution state snapshotting and differential transaction tracking.
-  - Robust handling of `litesvm@0.2.0` `TransactionMetadata` and `FailedTransactionMetadata`.
-- **`backend/src/sandbox/test_litesvmRunner.ts`:**
-  - Verified loading of `payloads/vault_v1_clean.so` in-memory.
-  - Executed Anchor `initialize` instruction in sandbox (15,961 CU).
-  - Executed Anchor `deposit` instruction for 2 SOL in sandbox (23,237 CU).
-  - Validated state cloning of Vault and UserPosition into a new sandbox running `payloads/vault_v2_malicious.so`.
+### Invariant Checks Implemented
+1. **`INV_RENT_FLOOR` (Rent Exemption Floor Protection):**
+   - Asserts that the vault account balance never drops below the minimum rent floor (`1,454,640` lamports).
+2. **`INV_CONSERVATION` (Deposit Conservation):**
+   - Asserts that any balance reduction in the vault matches the exact balance reduction of the requesting user's `UserPosition` account.
+3. **`INV_UNAUTHORIZED_DRAIN` (Backdoor Drain Detection):**
+   - Asserts that authority or third-party callers cannot extract funds without debiting a corresponding user position.
+   - Detects the exact unauthorized drain backdoor compiled into `vault_v2_malicious.so`.
+4. **`INV_NON_CUSTODIAL_EXIT` (Guardian Rescue Guarantee):**
+   - Asserts that guardian emergency exits return funds strictly to `userPosition.owner`, preventing custodial redirects.
 
+### Audit Test Matrix Results Across Payloads
 ```text
-=== ElfZero: Substep 4.1 LiteSVM Runner Verification ===
-  Authority: 38exe61HseYjzaw3fyebML3hXaf8QENViQEcvzB1QSDU
-  Guardian:  5EwpC6npjFbHtyHXtfVdsagTmJmwWzgh53EL66wagNod
-  User:      5RL7Z7qJb4LDwQi5xoaXDsr93oK8MnRPVidBb3opRuNc
-  Vault PDA: Enui9dpTAU9zkvEtJy9xLhvX9po95aq5uDCGvKzkNYtB bump: 255
-  UserPosition PDA: 9YmYAn4A9AcxBmMoue7e1Gn3bkyyQTzTynBB1U2KTVpV bump: 254
+=== ElfZero: Substep 4.2 Differential Invariant Engine Verification ===
 
-[Test 1] Initializing LiteSVM Sandbox with Clean V1 SBF Bytecode:
-  Program loaded successfully!
-  Airdropped 10 SOL each to Authority and Demo User in Sandbox.
-[Test 2] Simulating Anchor 'initialize' instruction:
-  Initialize Success: true (Compute Units Consumed: 15,961)
-  Post-Init Vault Lamports: 1,454,640, Data Length: 81 bytes
-[Test 3] Simulating Anchor 'deposit' of 2 SOL (2,000,000,000 lamports):
-  Deposit Success: true (Compute Units Consumed: 23,237)
-  Post-Deposit Vault Total Lamports: 2,001,454,640
-  Post-Deposit UserPosition Lamports: 1,454,640
-[Test 4] Testing Candidate Bytecode Replacement (Malicious V2):
-  Pre-upgrade snapshot cloned into candidate V2 sandbox.
-  Candidate Sandbox Pre-Execution Vault Balance: 2,001,454,640
->>> ALL SUBSTEP 4.1 TESTS PASSED SUCCESSFULLY! <<<
+[Test 1] Auditing Baseline Payload (vault_v1_clean.so):
+  Verdict: SAFE
+  Is Safe To Upgrade: true
+  Violations Count: 0
+  Recommended Action: PROCEED_WITH_UPGRADE
+
+[Test 2] Auditing Benign Upgrade Candidate (vault_v2_benign.so):
+  Verdict: SAFE
+  Is Safe To Upgrade: true
+  Violations Count: 0
+  Recommended Action: PROCEED_WITH_UPGRADE
+
+[Test 3] Auditing Malicious Exploit Upgrade (vault_v2_malicious.so):
+  Verdict: MALICIOUS_BACKDOOR_DETECTED
+  Is Safe To Upgrade: false
+  Violations Count: 1
+  Recommended Action: TRIGGER_EMERGENCY_EXIT_AND_ABORT
+    - [CRITICAL] Unauthorized Authority Drain Protection: CRITICAL BACKDOOR DETECTED: Upgrade authority was able to drain 2,000,000,000 lamports from the vault!
+
+>>> ALL SUBSTEP 4.2 INVARIANT ENGINE TESTS PASSED! <<<
 ```
 
 ---
 
 ## 3. Next Substeps
 
-- **Substep 4.2:** Pre-Upgrade Scenario Matrix & Invariant Rule Engine (`backend/src/sandbox/invariantEngine.ts`)
-  - Evaluates mathematical invariants:
-    - Invariant 1: Vault balance >= Rent exemption floor.
-    - Invariant 2: Total deposits == Sum of user position balances.
-    - Invariant 3: Unauthorized authority drain detection.
-    - Invariant 4: Non-custodial destination constraint verification.
 - **Substep 4.3:** LLM Differential Security Reporter (`backend/src/sandbox/llmReporter.ts`)
-- **Phase 5:** Guardian Auto-Exit Executor (`backend/src/guardian/`) & Attack Orchestrator
+  - Generates plain-English security advisories and exploit explanations using Google Gemini (`gemini-2.5-flash-lite` via OpenAI SDK).
+- **Phase 5:** Guardian Auto-Exit Executor (`backend/src/guardian/exitExecutor.ts`) & Attack Orchestrator
 - **Phase 6:** Frontend React Dashboard & WebSocket Live Feed
