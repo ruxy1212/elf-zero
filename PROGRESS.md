@@ -1,8 +1,8 @@
 # ElfZero: Engineering Progress & State Checkpoint
 
-**Date:** November 12, 2026  
+**Date:** November 13, 2026  
 **Branch:** `dev`  
-**Current Milestone:** Phase 2 Complete (Program, IDL, Deterministic Payloads, Deployment Instructions Ready)
+**Current Milestone:** Phase 3 Complete (Autonomous Buffer Watcher & Event Pipeline Verified)
 
 ---
 
@@ -10,65 +10,60 @@
 
 ElfZero is an Autonomous Upgradability Guardian and Program-Level Rollback Engine on Solana. It continuously monitors program upgrade buffers on-chain, replicates the proposed ELF bytecode into an isolated local LiteSVM environment, executes differential invariant sweeps against pre-upgrade state snapshots, and automatically triggers non-custodial emergency exits (`emergency_exit`) if invariant violations or unauthorized drains are detected.
 
-**Phase 2 is now fully completed:**
-1. Base contract (`elfzero_vault`) implemented, reviewed, and compiled with Agave/Anchor SBF toolchain.
-2. Three distinct upgrade `.so` binaries compiled and verified with SHA-256 hashes.
-3. IDL generated via `anchor idl build` and distributed to `target/idl/`, `backend/src/idl/`, and `frontend/src/idl/`.
-4. Manual deployment command prepared for Devnet using Helius RPC.
+**Phase 3 is now fully completed:**
+1. **Substep 3.1 (`e8daaa6`):** ELF Bytecode Parser & Buffer Layout Decoder (`backend/src/watcher/elfParser.ts` and `types.ts`).
+2. **Substep 3.2:** Real-Time Buffer Watcher & Event Pipeline (`backend/src/watcher/bufferWatcher.ts` and `test_bufferWatcher.ts`).
 
 ---
 
-## 2. Deterministic Payloads & Checksums
+## 2. Phase 3 Architecture: Buffer Watcher Service
 
-All three test payloads are compiled and stored in `payloads/`:
+### Core Components
+- **`backend/src/watcher/types.ts`:** Typed interfaces for parsed SBF ELF headers, bytecode summaries, on-chain buffer metadata, and watcher event streams.
+- **`backend/src/watcher/elfParser.ts`:**
+  - Decodes on-chain `UpgradeableLoaderState::Buffer` accounts (discriminator `[1, 0, 0, 0]`, authority `Option<Pubkey>` at offset 4..37).
+  - Dynamically discovers the start of the ELF binary using magic bytes `\x7fELF` (`0x7f, 0x45, 0x4c, 0x46`).
+  - Validates SBF architecture (`e_machine = 263` for `EM_SBF` or `247` for `EM_BPF`, 64-bit, little-endian).
+  - Calculates deterministic SHA-256 digests and extracts program entry points.
+- **`backend/src/watcher/bufferWatcher.ts`:**
+  - Dual-mode hybrid architecture:
+    1. **WebSocket Listener (`onProgramAccountChange`):** Zero-latency detection of buffer initialization and bytecode writes.
+    2. **Resilient Polling Fallback (`getProgramAccounts`):** Periodic scan with server-side `memcmp` filters (offset 0 discriminant + offset 5 authority) to prevent missed blocks.
+  - Ingests accounts, decodes ELF binaries, deduplicates identical payloads, and maintains an in-memory cache of known buffers.
+  - Emits typed events:
+    - `bufferDetected` (`BUFFER_DETECTED` / `BUFFER_MODIFIED`)
+    - `bytecodeExtracted` (`BYTECODE_EXTRACTED`)
+    - `invariantTriggerReady` (`INVARIANT_TRIGGER_READY` -> feeds Phase 4 LiteSVM sandbox)
+    - `bufferClosed`
 
-| Payload | File | Size | SHA-256 Checksum | Purpose |
-| :--- | :--- | :--- | :--- | :--- |
-| **V1 Clean** | `payloads/vault_v1_clean.so` | 184,840 bytes | `E0F8A3A24ACC56C3E316CA073E26DB0C90BA09A5FA193B1C917A52FB1B49DB50` | Initial baseline contract for deployment |
-| **V2 Benign** | `payloads/vault_v2_benign.so` | 184,960 bytes | `2AA51E3406751B8EAB49FB14B7CA0070E9994FB760A31FEE42EE907895958796` | Safe simulated upgrade (passes invariant tests) |
-| **V2 Malicious** | `payloads/vault_v2_malicious.so` | 186,848 bytes | `46299C59B06A12FC9D617976CF8D256AC9029220C4C4EF5353247B32D49F461F` | Exploit upgrade (drains vault, triggers Guardian rescue) |
-
-`target/deploy/elfzero_vault.so` is restored and verified to match `payloads/vault_v1_clean.so`.
-
----
-
-## 3. Contract Keypairs & Identity
-
-- **Program ID:** `D8r3d2uXQn9wYE96BRjyYqmqReFbziK5rfSwdYvHEtkT`
-- **Program Keypair:** `target/deploy/elfzero_vault-keypair.json`
-- **Authority (Upgrade Authority & Admin):** `38exe61HseYjzaw3fyebML3hXaf8QENViQEcvzB1QSDU` (`backend/.keys/authority.json`)
-- **Guardian (Autonomous Security Agent):** `5EwpC6npjFbHtyHXtfVdsagTmJmwWzgh53EL66wagNod` (`backend/.keys/guardian.json`)
-- **Demo User (Depositor):** `5RL7Z7qJb4LDwQi5xoaXDsr93oK8MnRPVidBb3opRuNc` (`backend/.keys/demo_user.json`)
-
----
-
-## 4. Manual Devnet Deployment Instructions
-
-To deploy the program manually to Devnet using your Helius RPC:
-
-### Step 1: Ensure Deployer Has Sufficient SOL (~1.5 SOL for ~185 KB Program Rent)
-```bash
-# Check authority balance (or fund it from your personal CLI keypair):
-solana balance 38exe61HseYjzaw3fyebML3hXaf8QENViQEcvzB1QSDU --url "<YOUR_HELIUS_DEVNET_RPC_URL>"
-```
-
-### Step 2: Execute Deployment Command
-Run inside WSL from the project root (`C:\laragon\www\react\ideas\solana-grant\elf-zero`):
-```bash
-solana program deploy \
-  --url "<YOUR_HELIUS_DEVNET_RPC_URL>" \
-  --keypair backend/.keys/authority.json \
-  --program-id target/deploy/elfzero_vault-keypair.json \
-  --upgrade-authority backend/.keys/authority.json \
-  target/deploy/elfzero_vault.so
+### Verification Results
+```text
+=== ElfZero: Substep 3.2 Buffer Watcher Verification ===
+[Test 1] Verifying filter generation:
+  Filters count: 2 (Discriminant offset 0, Authority offset 5)
+[Test 2] Ingesting newly detected clean V1 buffer account:
+  [Event] bufferDetected: BUFFER_DETECTED for buffer 11111111111111111111111111111112
+  [Event] bytecodeExtracted: 184840 bytes, SHA256: e0f8a3a24acc56c3...
+  [Event] invariantTriggerReady: Payload ready for LiteSVM simulation!
+[Test 3] Testing deduplication with identical buffer data:
+  Deduplication verified: duplicate buffer ignored.
+[Test 4] Testing buffer update with modified (malicious) bytecode:
+  [Event] bufferDetected: BUFFER_MODIFIED for buffer 11111111111111111111111111111112
+  [Event] bytecodeExtracted: 186848 bytes, SHA256: 46299c59b06a12fc...
+  [Event] invariantTriggerReady: Payload ready for LiteSVM simulation!
+[Test 5] Verifying internal buffer cache:
+  Cached buffers count: 1 (consistent)
+>>> ALL SUBSTEP 3.2 TESTS PASSED SUCCESSFULLY! <<<
 ```
 
 ---
 
-## 5. Next Phase: Phase 3 (Buffer Watcher Service)
+## 3. Next Phase: Phase 4 (LiteSVM Sandbox Differential Execution & Invariant Engine)
 
-Following manual deployment:
-- **Phase 3:** Build `backend/src/watcher/elfParser.ts` and `backend/src/watcher/bufferWatcher.ts` to monitor on-chain buffer accounts using Helius WebSocket / RPC.
-- **Phase 4:** Build LiteSVM Sandbox differential runner & invariant engine.
-- **Phase 5:** Build Guardian auto-exit executor & attack simulator.
-- **Phase 6:** Build frontend React dashboard with live WebSocket feeds.
+Following Phase 3 completion:
+- **Phase 4:**
+  - **4.1:** LiteSVM Program Loader & State Duplicator (`backend/src/sandbox/litesvmRunner.ts`)
+  - **4.2:** Pre-Upgrade Scenario Builder & Differential Invariant Engine (`backend/src/sandbox/invariantEngine.ts`)
+  - **4.3:** LLM Audit / Report Generator (`backend/src/sandbox/llmReporter.ts`)
+- **Phase 5:** Guardian Auto-Exit Executor (`backend/src/guardian/`) & Attack Orchestrator
+- **Phase 6:** Frontend Dashboard & WebSocket Live Feed
