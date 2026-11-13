@@ -109,10 +109,10 @@ async function runTests() {
   const v2AccountData = createMockBufferAccount(mockAuthority, maliciousElf);
   await watcher.processBufferAccount(mockBufferPubkey, v2AccountData, 105);
 
-  if (detectedEvents.length !== 2 || detectedEvents[1].type !== "BUFFER_MODIFIED") {
+  if ((detectedEvents.length as number) !== 2 || detectedEvents[1].type !== "BUFFER_MODIFIED") {
     throw new Error("Failed to emit BUFFER_MODIFIED on bytecode update");
   }
-  if (invariantEvents.length !== 2) {
+  if ((invariantEvents.length as number) !== 2) {
     throw new Error("Failed to emit invariantTriggerReady on buffer modification");
   }
   console.log("  Buffer modification detected and new invariant trigger fired!");
