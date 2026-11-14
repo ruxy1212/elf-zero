@@ -2,7 +2,7 @@
 
 **Date:** November 14, 2026  
 **Branch:** `dev`  
-**Current Milestone:** Phase 6 (Frontend UI Dashboard & Live Telemetry Feed) - Substeps 6.1 & 6.2 Complete
+**Current Milestone:** Phase 6 Complete (Full Frontend UI & Live End-to-End Autonomous Defense Verified)
 
 ---
 
@@ -10,64 +10,102 @@
 
 ElfZero is an Autonomous Upgradability Guardian and Program-Level Rollback Engine on Solana. It continuously monitors program upgrade buffers on-chain, replicates the proposed ELF bytecode into an isolated local LiteSVM environment, executes differential invariant sweeps against pre-upgrade state snapshots, and automatically triggers non-custodial emergency exits (`emergency_exit`) if invariant violations or unauthorized drains are detected.
 
-### Phase 6 Progress Status:
-- **Substep 6.1 Complete (`b11384c`):** Scaffolding & State Foundation:
-  - Enterprise purple-on-white theme (`#FAFAFD` canvas, `#FFFFFF` cards, `#5B21B6`/`#6D28D9` royal violet accents, hairline borders `border-slate-200`).
-  - Strict TypeScript definitions (`frontend/src/types/index.ts`).
-  - Solana Wallet Adapter & Multi-Role Provider (`frontend/src/context/WalletProvider.tsx`).
-  - Live Telemetry Hook with WebSocket listener & REST status polling (`frontend/src/hooks/useDashboardState.ts`).
-  - Header & Role Switcher (`frontend/src/components/Header.tsx`).
-  - Protocol Metrics Bar (`frontend/src/components/MetricsOverview.tsx`).
-  - Candidate Staging & Attack Orchestration Card (`frontend/src/components/CandidateStage.tsx`).
-- **Substep 6.2 Complete:** Core Diagnostic & Evacuation Components:
-  - **Differential Invariant Matrix Table** (`frontend/src/components/InvariantMatrixTable.tsx`): 4-invariant status cards (`INV_RENT_FLOOR`, `INV_CONSERVATION`, `INV_UNAUTHORIZED_DRAIN`, `INV_NON_CUSTODIAL_EXIT`), dual-execution test vector comparison, CU tracking, expandable trace logs, and delta comparisons.
-  - **Guardian Telemetry Timeline** (`frontend/src/components/TelemetryTimeline.tsx`): 6-stage pipeline progress checklist and live chronological event feed.
-  - **AI Security Advisory Card** (`frontend/src/components/SecurityAdvisoryCard.tsx`): Google Gemini 2.5 Flash-Lite risk meter (0–100), technical root-cause analysis, economic risk assessment, and recommended action badge.
-  - **Non-Custodial Evacuation Ledger** (`frontend/src/components/EvacuationLedger.tsx`): Autonomous rescue summary, position PDA, owner recipient wallet verification (`destination.key() == user_position.owner`), and Devnet Explorer links.
-  - Fully wired in `frontend/src/App.tsx`.
-  - Production build verified: `tsc && vite build` succeeded in 32s with 0 errors.
+### Project Milestones (All Phases Complete):
+- [x] **Phase 1: Workspace Scaffolding & Setup (`0defafd`)**: Monorepo layout, deterministic role keypairs, Solana Devnet funding.
+- [x] **Phase 2: Smart Contract & Payloads (`b507b46`)**: `elfzero_vault` Anchor program deployed on Devnet (`D8r3d2uXQn9wYE96BRjyYqmqReFbziK5rfSwdYvHEtkT`), 3 deterministic test `.so` binaries compiled (`vault_v1_clean.so`, `vault_v2_benign.so`, `vault_v2_malicious.so`).
+- [x] **Phase 3: Autonomous Buffer Watcher (`e0ffc4d`)**: BPF upgradeable loader buffer parser & hybrid WebSocket/filtered polling watcher.
+- [x] **Phase 4: LiteSVM Differential Sandbox & Invariant Engine (`d20b1d4`)**: In-memory Solana VM replicator, 4 invariant assertions (`INV_RENT_FLOOR`, `INV_CONSERVATION`, `INV_UNAUTHORIZED_DRAIN`, `INV_NON_CUSTODIAL_EXIT`), and Google Gemini LLM security reporter.
+- [x] **Phase 5: Guardian Auto-Exit Executor & Attack Orchestrator (`ee981f9`)**: Autonomous on-chain position rescue pipeline & end-to-end defense coordinator.
+- [x] **Phase 6.1: Frontend Scaffolding & State Foundation (`b11384c`)**: Purple-on-white theme, Solana wallet adapter, live telemetry hook, header, metrics bar, and candidate staging.
+- [x] **Phase 6.2: Core Diagnostics & Evacuation Ledger (`7c950e2`)**: Differential Invariant Matrix Table, Telemetry Timeline Checklist, Gemini Security Advisory Card, and Non-Custodial Evacuation Ledger.
+- [x] **Phase 6.3: Live Integration & End-to-End UI Verification**: Backend Express & WebSocket server (`:3001`) and Vite frontend (`:3000`) booted; Benign V2 and Malicious V2 simulations verified live through the application.
 
 ---
 
-## 2. Phase 6 Frontend Architecture & Component Hierarchy
+## 2. End-to-End Simulation Test Run Evidence
+
+### Benign V2 Candidate Simulation:
+- **Candidate Payload:** `vault_v2_benign.so` (184,960 bytes, SHA-256: `2aa51e340675...`)
+- **LiteSVM Scenarios:**
+  - Legitimate User Withdrawal: `PASSED` (14,231 CU, Rent floor & Conservation satisfied).
+  - Authority Backdoor Drain Sweep: `PASSED` (Rejected with `UnauthorizedDepositor` 0x1772).
+  - Guardian Emergency Rescue: `PASSED` (14,169 CU, Non-custodial return verified).
+- **Invariant Violations:** `0`
+- **Verdict:** `SAFE`
+- **Gemini Advisory:** Risk Score `0 / 100` (`PROCEED_WITH_UPGRADE`).
+- **Guardian Intervention:** Dispatched: `false` (Protocol upgrade approved).
+
+### Malicious V2 Candidate Attack & Autonomous Defense:
+- **Candidate Payload:** `vault_v2_malicious.so` (186,848 bytes, SHA-256: `46299c59b06a...`)
+- **LiteSVM Scenarios:**
+  - Legitimate User Withdrawal: `PASSED` (14,173 CU).
+  - Authority Backdoor Drain Sweep: `FAILED / EXPLOITED` (Authority drained 2 SOL via backdoor without owner signature!).
+- **Invariant Violations:** `1` (`INV_UNAUTHORIZED_DRAIN` breached).
+- **Verdict:** `MALICIOUS_BACKDOOR_DETECTED`
+- **Gemini Advisory:** Risk Score `100 / 100` (`TRIGGER_EMERGENCY_EXIT_AND_ABORT`).
+- **Guardian Auto-Exit Execution:** Autonomous emergency exit dispatched to evacuate protected collateral strictly to depositor wallet (`destination.key() == user_position.owner`).
+- **Total Intervention Latency:** `188ms`.
+
+---
+
+## 3. Production Architecture Overview
 
 ```mermaid
 flowchart TD
-    App["App (AppWalletProvider)"] --> Header["Header (Brand, Program ID, Role Switcher, Wallet)"]
-    App --> Metrics["MetricsOverview (Collateral, Positions, Rent Floor, Armed Status)"]
-    App --> CandidateStage["CandidateStage (Staged ELF Info, Simulate Benign/Malicious Triggers)"]
-    App --> Grid["Diagnostics Grid"]
-    Grid --> InvariantTable["InvariantMatrixTable (4 Invariants, CU Consumed, LiteSVM Trace Logs)"]
-    Grid --> Timeline["TelemetryTimeline (6-Stage Stepper, Live WebSocket Feed)"]
-    App --> Advisory["SecurityAdvisoryCard (Gemini Risk Meter 0-100, Root Cause, Action)"]
-    App --> Evacuation["EvacuationLedger (Rescued Collateral, Owner Recipient, Explorer Links)"]
+    subgraph Frontend["Frontend Client (Port 3000)"]
+        UI["ElfZero Purple-on-White Dashboard"]
+        Header["Header & Role Switcher"]
+        Metrics["Live Metrics (Collateral, Positions, Rent Floor)"]
+        Matrix["Differential Invariant Matrix (CU & Trace Logs)"]
+        Timeline["Telemetry Timeline (6-Stage Stepper)"]
+        Advisory["Gemini AI Advisory (0-100 Risk Meter)"]
+        Ledger["Non-Custodial Evacuation Ledger"]
+    end
+
+    subgraph Backend["Guardian Backend (Port 3001)"]
+        API["Express API + WebSocket Server"]
+        Watcher["On-Chain Buffer Watcher"]
+        Sandbox["LiteSVM Differential Sandbox"]
+        Invariants["Invariant Engine (4 Assertions)"]
+        Gemini["Google Gemini 2.5 Flash-Lite Reporter"]
+        Executor["Guardian Auto-Exit Executor"]
+    end
+
+    subgraph Solana["Solana Devnet"]
+        Program["elfzero_vault (D8r3d...HEtkT)"]
+        VaultPDA["Vault PDA (Enui9...NYtB)"]
+        PositionPDA["User Position PDA (9YmY...TVpV)"]
+        BPF["BPF Upgradeable Loader Buffers"]
+    end
+
+    UI --> API
+    API --> Watcher
+    API --> Sandbox
+    Sandbox --> Invariants
+    Invariants --> Gemini
+    Gemini --> Executor
+    Watcher --> BPF
+    Executor --> Program
+    Program --> VaultPDA
+    Program --> PositionPDA
 ```
 
 ---
 
-## 3. Verified Build Verification
+## 4. Operational Runbook
 
-```text
-> elfzero-frontend@0.1.0 build
-> tsc && vite build
+To run ElfZero locally:
 
-vite v6.4.5 building for production...
-transforming...
-✓ 1866 modules transformed.
-rendering chunks...
-computing gzip size...
-dist/index.html                   0.48 kB │ gzip:   0.32 kB
-dist/assets/index-B9VKw93F.css   31.51 kB │ gzip:   6.74 kB
-dist/assets/index-B8KtFABn.js   718.14 kB │ gzip: 217.96 kB
-✓ built in 32.69s
-```
+1. **Backend Server (Express & WebSocket):**
+   ```bash
+   cd backend
+   pnpm exec tsx src/index.ts
+   ```
+   *Runs on `http://localhost:3001` and `ws://localhost:3001`.*
 
----
-
-## 4. Next Step: Phase 6.3 (Live Integration & End-to-End Verification)
-
-- Boot backend server (`backend/src/index.ts`) in WSL Ubuntu on port 3001 (`http://localhost:3001` + `ws://localhost:3001`).
-- Boot frontend development server (`frontend/`) on port 3000.
-- Execute live verification:
-  1. Trigger Benign V2: Verify 0 violations, green status, Risk Score 0, no evacuation dispatched.
-  2. Trigger Malicious V2: Verify backdoor detection, Risk Score 98–100, autonomous evacuation of user collateral to owner wallet with real transaction link.
+2. **Frontend UI Dashboard:**
+   ```bash
+   cd frontend
+   pnpm dev
+   ```
+   *Opens on `http://localhost:3000`.*

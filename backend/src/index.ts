@@ -11,6 +11,11 @@ import { SimulationRunResult, SimulationTimelineEvent } from "./simulator/types"
 
 dotenv.config();
 
+// Enable JSON serialization for BigInt values returned by LiteSVM
+(BigInt.prototype as any).toJSON = function () {
+  return this.toString();
+};
+
 const app = express();
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
