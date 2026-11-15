@@ -70,6 +70,10 @@ watcher.on("invariantTriggerReady", async (event, elf) => {
   console.log(`[Watcher] On-chain buffer detected: ${event.bufferAddress}. Triggering evaluation...`);
 });
 
+watcher.on("error", (err: any) => {
+  console.warn(`[Watcher] Background polling warning (e.g. RPC rate limit): ${err.message}`);
+});
+
 let lastSimulationResult: SimulationRunResult | null = null;
 
 // API Endpoints
