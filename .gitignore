@@ -7,4 +7,6 @@ dist/
 .env
 .env.local
 backend/.keys/
+.vite/
+**/.vite/
 **/*.DS_Store
