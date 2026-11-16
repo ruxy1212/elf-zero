@@ -94,11 +94,14 @@ export const EvacuationLedger: FC<EvacuationLedgerProps> = ({
           </div>
 
           {/* Non-Custodial Destination Notice */}
-          <div className="p-3.5 rounded-lg bg-violet-50/60 border border-violet-200 text-xs flex items-center gap-3">
-            <Lock className="w-4 h-4 text-violet-700 shrink-0" />
-            <div className="text-violet-950 font-sans text-xs">
-              <span className="font-semibold">Non-Custodial Guarantee:</span> Under the smart contract's Anchor constraints, rescued funds can <span className="font-semibold underline">only</span> be returned to the original depositor's wallet. The Guardian has zero authority to redirect collateral.
+          <div className="p-2.5 rounded-lg bg-violet-50/60 border border-violet-200 text-xs flex items-center justify-between gap-2">
+            <div className="text-violet-950 font-sans text-[11px] flex items-center gap-2">
+              <Lock className="w-3.5 h-3.5 text-violet-700 shrink-0" />
+              <span>Smart contract constraints enforce direct non-custodial return to depositor address.</span>
             </div>
+            <span className="text-[10px] font-semibold text-violet-700 bg-violet-50 px-2 py-0.5 rounded border border-violet-100 shrink-0">
+              Anchor Validated
+            </span>
           </div>
 
           {/* Rescued Positions Table */}
