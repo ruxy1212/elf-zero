@@ -1,23 +1,29 @@
+import { useState } from "react";
 import { AppWalletProvider } from "./context/WalletProvider";
 import { useDashboardState } from "./hooks/useDashboardState";
 import { Header } from "./components/Header";
 import { MetricsOverview } from "./components/MetricsOverview";
 import { CandidateStage } from "./components/CandidateStage";
 import { InvariantMatrixTable } from "./components/InvariantMatrixTable";
-import { TelemetryTimeline } from "./components/TelemetryTimeline";
 import { SecurityAdvisoryCard } from "./components/SecurityAdvisoryCard";
 import { EvacuationLedger } from "./components/EvacuationLedger";
-import { AlertCircle } from "lucide-react";
+import { AuditHistoryLedger } from "./components/AuditHistoryLedger";
+import { AlertCircle, ChevronDown, ChevronUp, FileCode } from "lucide-react";
 
 function DashboardContent() {
   const {
     status,
-    timeline,
     activeSimulation,
     isSimulating,
+    isDepositing,
     error,
+    history,
     triggerSimulation,
+    depositToVault,
+    resetDemo,
   } = useDashboardState();
+
+  const [showTechnicalDetails, setShowTechnicalDetails] = useState(false);
 
   const programId =
     status?.programId || "D8r3d2uXQn9wYE96BRjyYqmqReFbziK5rfSwdYvHEtkT";
@@ -26,7 +32,11 @@ function DashboardContent() {
 
   return (
     <div className="min-h-screen bg-[#FAFAFD] text-slate-900 flex flex-col font-sans selection:bg-violet-100 selection:text-violet-900">
-      <Header programId={programId} isOnline={isOnline} />
+      <Header
+        programId={programId}
+        isOnline={isOnline}
+        onResetDemo={resetDemo}
+      />
 
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
         {/* Error Notification Banner if any */}
@@ -37,92 +47,69 @@ function DashboardContent() {
           </div>
         )}
 
-        {/* Hero Explainer: What is ElfZero and How Does it Protect You? */}
-        <div className="bg-gradient-to-r from-violet-900 via-indigo-900 to-slate-900 rounded-2xl p-6 sm:p-8 text-white shadow-sm">
-          <div className="max-w-3xl">
-            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-violet-500/20 text-violet-200 border border-violet-400/30">
-              Autonomous Upgradability Security
-            </span>
-            <h1 className="mt-3 text-2xl sm:text-3xl font-bold tracking-tight text-white">
-              Zero-Trust Protection Against Malicious Smart Contract Upgrades
-            </h1>
-            <p className="mt-2 text-sm text-slate-300 leading-relaxed">
-              On Solana, protocol deployers can upgrade program bytecode at any time. If an admin key is compromised or rogue code is deployed, user funds could be drained instantly. ElfZero monitors candidate upgrade buffers, differential-fuzzes the new code in an isolated sandbox, and rescues your collateral before an exploit can execute.
-            </p>
-          </div>
+        {/* Top 2-Column Main Stage */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-stretch">
+          {/* Left Column: Your Protected Assets */}
+          <MetricsOverview
+            status={status}
+            isDepositing={isDepositing}
+            onDeposit={depositToVault}
+          />
 
-          <div className="mt-6 pt-6 border-t border-white/10 grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div className="flex items-start gap-3">
-              <div className="w-7 h-7 rounded-lg bg-violet-500/20 border border-violet-400/30 flex items-center justify-center font-bold text-xs text-violet-300 shrink-0">
-                1
-              </div>
-              <div>
-                <h4 className="text-xs font-bold text-white uppercase tracking-wider">Intercept Staged Code</h4>
-                <p className="mt-0.5 text-xs text-slate-300">Catches candidate bytecode in Solana BPF loader buffers before deployment.</p>
-              </div>
-            </div>
-
-            <div className="flex items-start gap-3">
-              <div className="w-7 h-7 rounded-lg bg-violet-500/20 border border-violet-400/30 flex items-center justify-center font-bold text-xs text-violet-300 shrink-0">
-                2
-              </div>
-              <div>
-                <h4 className="text-xs font-bold text-white uppercase tracking-wider">Sandbox & Verify</h4>
-                <p className="mt-0.5 text-xs text-slate-300">Differential engine tests for unauthorized fund drains and invariant breaches.</p>
-              </div>
-            </div>
-
-            <div className="flex items-start gap-3">
-              <div className="w-7 h-7 rounded-lg bg-violet-500/20 border border-violet-400/30 flex items-center justify-center font-bold text-xs text-violet-300 shrink-0">
-                3
-              </div>
-              <div>
-                <h4 className="text-xs font-bold text-white uppercase tracking-wider">Autonomous Auto-Rescue</h4>
-                <p className="mt-0.5 text-xs text-slate-300">Dispatches non-custodial emergency exits to return 100% of collateral to user wallets.</p>
-              </div>
-            </div>
-          </div>
+          {/* Right Column: Pre-Upgrade Defense Testing Lab */}
+          <CandidateStage
+            isSimulating={isSimulating}
+            activeSimulation={activeSimulation}
+            onTriggerSimulation={triggerSimulation}
+          />
         </div>
 
-        {/* Section 1: Protocol Metrics Bar */}
-        <MetricsOverview status={status} />
-
-        {/* Section 2: Interactive Testing Studio */}
-        <CandidateStage
-          isSimulating={isSimulating}
-          activeSimulation={activeSimulation}
-          onTriggerSimulation={triggerSimulation}
-        />
-
-        {/* Section 3: Dual Grid: Invariant Matrix & Defense Timeline */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
-          <div className="lg:col-span-2">
-            <InvariantMatrixTable
-              auditReport={activeSimulation?.auditReport ?? null}
+        {/* Live Rescue Receipt (Appears when active simulation is present) */}
+        {activeSimulation && (
+          <div className="space-y-4">
+            <EvacuationLedger
+              rescueSummary={activeSimulation.rescueSummary}
               isSimulating={isSimulating}
             />
+
+            {/* Collapsible Deep-Dive Accordion for Judges & Developers */}
+            <div className="pt-2">
+              <button
+                onClick={() => setShowTechnicalDetails((prev) => !prev)}
+                className="w-full inline-flex items-center justify-between p-4 rounded-xl bg-white border border-slate-200 hover:border-slate-300 shadow-xs transition-colors text-xs font-semibold text-slate-700"
+              >
+                <div className="flex items-center gap-2">
+                  <FileCode className="w-4 h-4 text-violet-700" />
+                  <span>
+                    {showTechnicalDetails ? "Hide" : "Inspect"} AI Security Intelligence & LiteSVM Invariant Assertions
+                  </span>
+                </div>
+                {showTechnicalDetails ? (
+                  <ChevronUp className="w-4 h-4 text-slate-400" />
+                ) : (
+                  <ChevronDown className="w-4 h-4 text-slate-400" />
+                )}
+              </button>
+
+              {showTechnicalDetails && (
+                <div className="mt-4 space-y-6 animate-in fade-in duration-300">
+                  <SecurityAdvisoryCard
+                    advisory={activeSimulation.advisory}
+                    isSimulating={isSimulating}
+                  />
+
+                  <InvariantMatrixTable
+                    auditReport={activeSimulation.auditReport}
+                    isSimulating={isSimulating}
+                  />
+                </div>
+              )}
+            </div>
           </div>
+        )}
 
-          <div className="lg:col-span-1">
-            <TelemetryTimeline
-              timeline={timeline}
-              isSimulating={isSimulating}
-              isOnline={isOnline}
-            />
-          </div>
-        </div>
-
-        {/* Section 4: AI Security Advisory */}
-        <SecurityAdvisoryCard
-          advisory={activeSimulation?.advisory ?? null}
-          isSimulating={isSimulating}
-        />
-
-        {/* Section 5: Non-Custodial Emergency Evacuation Ledger */}
-        <EvacuationLedger
-          rescueSummary={activeSimulation?.rescueSummary}
-          isSimulating={isSimulating}
-        />
+        {/* Persistent Audit History */}
+        <AuditHistoryLedger history={history} />
       </main>
 
       {/* Clean Enterprise Footer */}

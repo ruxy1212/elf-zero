@@ -106,6 +106,23 @@ export interface SimulationRunResult {
   durationMs: number;
 }
 
+export interface AuditHistoryEntry {
+  id: string;
+  timestamp: number;
+  simulationType: "BENIGN_V2" | "MALICIOUS_V2";
+  candidateSha256: string;
+  verdict: "SAFE" | "MALICIOUS_BACKDOOR_DETECTED";
+  riskScore: number;
+  rescuedAmountSol: string;
+  signature?: string;
+  summary: string;
+  advisory?: {
+    title: string;
+    executiveSummary: string;
+    technicalAnalysis: string;
+  };
+}
+
 export interface ProtocolStatus {
   success: boolean;
   programId: string;
@@ -117,4 +134,5 @@ export interface ProtocolStatus {
   guardian: string;
   demoUser: string;
   lastSimulationResult: SimulationRunResult | null;
+  history?: AuditHistoryEntry[];
 }

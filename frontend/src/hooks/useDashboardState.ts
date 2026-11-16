@@ -11,6 +11,7 @@ export function useDashboardState() {
   const [activeSimulation, setActiveSimulation] =
     useState<SimulationRunResult | null>(null);
   const [isSimulating, setIsSimulating] = useState(false);
+  const [isDepositing, setIsDepositing] = useState(false);
   const [wsConnected, setWsConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -32,23 +33,6 @@ export function useDashboardState() {
       setError(null);
     } catch (err: any) {
       console.warn("Could not fetch /api/status:", err.message);
-      // Fallback mock protocol stats if backend is starting up
-      setStatus((prev) =>
-        prev
-          ? prev
-          : {
-              success: true,
-              programId: "D8r3d2uXQn9wYE96BRjyYqmqReFbziK5rfSwdYvHEtkT",
-              vaultPda: "Enui9dpTAU9zkvEtJy9xLhvX9po95aq5uDCGvKzkNYtB",
-              userPositionPda: "9YmYAn4A9AcxBmMoue7e1Gn3bkyyQTzTynBB1U2KTVpV",
-              vaultLamports: 2_500_000_000,
-              userLamports: 9_998_540_360,
-              authority: "38exe61HseYjzaw3fyebML3hXaf8QENViQEcvzB1QSDU",
-              guardian: "5EwpC6npjFbHtyHXtfVdsagTmJmwWzgh53EL66wagNod",
-              demoUser: "5RL7Z7qJb4LDwQi5xoaXDsr93oK8MnRPVidBb3opRuNc",
-              lastSimulationResult: null,
-            }
-      );
     }
   }, [activeSimulation]);
 
@@ -64,7 +48,6 @@ export function useDashboardState() {
 
       ws.onopen = () => {
         setWsConnected(true);
-        console.log("[ElfZero WS] Telemetry stream connected");
       };
 
       ws.onmessage = (event) => {
@@ -89,7 +72,6 @@ export function useDashboardState() {
 
       ws.onclose = () => {
         setWsConnected(false);
-        console.log("[ElfZero WS] Disconnected. Reconnecting in 3s...");
         reconnectTimer = setTimeout(connectWs, 3000);
       };
 
@@ -101,8 +83,12 @@ export function useDashboardState() {
     connectWs();
     refreshStatus();
 
+    // Poll status every 4 seconds as reliable source of truth
+    const pollTimer = setInterval(refreshStatus, 4000);
+
     return () => {
       clearTimeout(reconnectTimer);
+      clearInterval(pollTimer);
       if (wsRef.current) {
         wsRef.current.close();
       }
@@ -147,14 +133,56 @@ export function useDashboardState() {
     [refreshStatus]
   );
 
+  // Deposit 0.10 SOL into vault on Devnet
+  const depositToVault = useCallback(async () => {
+    setIsDepositing(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/vault/deposit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+      if (!res.ok) {
+        throw new Error(`Deposit failed: ${res.statusText}`);
+      }
+      const data = await res.json();
+      if (!data.success) {
+        throw new Error(data.error || "Deposit transaction failed");
+      }
+      await refreshStatus();
+    } catch (err: any) {
+      console.error("Deposit error:", err);
+      setError(err.message);
+    } finally {
+      setIsDepositing(false);
+    }
+  }, [refreshStatus]);
+
+  // Reset demo state
+  const resetDemo = useCallback(async () => {
+    setError(null);
+    try {
+      await fetch("/api/demo/reset", { method: "POST" });
+      setActiveSimulation(null);
+      setTimeline([]);
+      await refreshStatus();
+    } catch (err: any) {
+      console.warn("Reset error:", err.message);
+    }
+  }, [refreshStatus]);
+
   return {
     status,
     timeline,
     activeSimulation,
     isSimulating,
+    isDepositing,
     wsConnected,
     error,
+    history: status?.history || [],
     triggerSimulation,
+    depositToVault,
+    resetDemo,
     refreshStatus,
   };
 }
