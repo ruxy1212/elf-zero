@@ -1,6 +1,8 @@
 import express from "express";
 import http from "http";
 import cors from "cors";
+import path from "path";
+import fs from "fs";
 import dotenv from "dotenv";
 import { WebSocketServer, WebSocket } from "ws";
 import {
@@ -295,6 +297,26 @@ wss.on("connection", (ws) => {
     console.log("[WS] Client disconnected");
   });
 });
+
+// Production: Serve static frontend build if present
+const frontendDist = path.resolve(__dirname, "../../frontend/dist");
+const alternativeDist = path.resolve(__dirname, "../public");
+const staticPath = fs.existsSync(frontendDist)
+  ? frontendDist
+  : fs.existsSync(alternativeDist)
+  ? alternativeDist
+  : null;
+
+if (staticPath) {
+  console.log(`[ElfZero] Serving static frontend from: ${staticPath}`);
+  app.use(express.static(staticPath));
+  app.get("*", (req, res, next) => {
+    if (req.path.startsWith("/api") || req.path.startsWith("/health") || req.path.startsWith("/ws")) {
+      return next();
+    }
+    res.sendFile(path.join(staticPath, "index.html"));
+  });
+}
 
 // Start service
 server.listen(PORT, async () => {

@@ -1,0 +1,28 @@
+services:
+  - type: web
+    name: elfzero-guardian
+    runtime: docker
+    plan: free
+    region: oregon
+    dockerfilePath: ./Dockerfile
+    envVars:
+      - key: PORT
+        value: 3001
+      - key: NODE_ENV
+        value: production
+      - key: SOLANA_RPC_URL
+        value: https://api.devnet.solana.com
+      - key: PROGRAM_ID
+        value: D8r3d2uXQn9wYE96BRjyYqmqReFbziK5rfSwdYvHEtkT
+      - key: OPEN_AI_MODEL
+        value: gemini-2.5-flash-lite
+      - key: OPEN_AI_BASE_URL
+        value: https://generativelanguage.googleapis.com/v1beta/openai/
+      - key: OPEN_AI_API_KEY
+        sync: false
+      - key: AUTHORITY_SECRET_KEY
+        sync: false
+      - key: GUARDIAN_SECRET_KEY
+        sync: false
+      - key: DEMO_USER_SECRET_KEY
+        sync: false
