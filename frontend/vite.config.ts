@@ -1,9 +1,23 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
+import { execSync } from "child_process";
 
-const BACKEND_URL = process.env.VITE_BACKEND_URL || "http://172.25.224.149:3001";
-const WS_BACKEND_URL = process.env.VITE_WS_BACKEND_URL || "ws://172.25.224.149:3001";
+function getWslIp(): string {
+  try {
+    const ip = execSync("wsl -d Ubuntu hostname -I").toString().trim().split(" ")[0];
+    if (ip && ip.length > 6) {
+      return ip;
+    }
+  } catch {
+    // fallback
+  }
+  return "127.0.0.1";
+}
+
+const wslIp = getWslIp();
+const BACKEND_URL = process.env.VITE_BACKEND_URL || `http://${wslIp}:3001`;
+const WS_BACKEND_URL = process.env.VITE_WS_BACKEND_URL || `ws://${wslIp}:3001`;
 
 // https://vite.dev/config/
 export default defineConfig({

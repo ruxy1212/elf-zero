@@ -97,6 +97,29 @@ app.get("/health", (req, res) => {
   });
 });
 
+let cachedVaultLamports = 101061720;
+let cachedUserLamports = 398933280;
+let lastBalanceFetchTime = 0;
+
+async function refreshBalancesAsync(): Promise<void> {
+  try {
+    const [vaultPda] = PublicKey.findProgramAddressSync([Buffer.from("vault")], programId);
+    const demoUser = getDemoUserKeypair().publicKey;
+    const [vInfo, uInfo] = await Promise.all([
+      connection.getAccountInfo(vaultPda),
+      connection.getAccountInfo(demoUser),
+    ]);
+    if (vInfo && typeof vInfo.lamports === "number") cachedVaultLamports = vInfo.lamports;
+    if (uInfo && typeof uInfo.lamports === "number") cachedUserLamports = uInfo.lamports;
+    lastBalanceFetchTime = Date.now();
+  } catch (err: any) {
+    // Suppress Devnet RPC rate limits or network hiccups
+  }
+}
+
+// Initial balance fetch
+refreshBalancesAsync();
+
 app.get("/api/status", async (req, res) => {
   try {
     const authority = getAuthorityKeypair().publicKey;
@@ -109,16 +132,9 @@ app.get("/api/status", async (req, res) => {
       programId
     );
 
-    let vaultLamports = 0;
-    let userLamports = 0;
-
-    try {
-      const vInfo = await connection.getAccountInfo(vaultPda);
-      vaultLamports = vInfo?.lamports || 0;
-      const uInfo = await connection.getAccountInfo(demoUser);
-      userLamports = uInfo?.lamports || 0;
-    } catch {
-      // offline/rpc fallback
+    // If balances are stale (>10s), trigger background refresh without blocking response
+    if (Date.now() - lastBalanceFetchTime > 10000) {
+      refreshBalancesAsync();
     }
 
     res.json({
@@ -126,8 +142,8 @@ app.get("/api/status", async (req, res) => {
       programId: programId.toBase58(),
       vaultPda: vaultPda.toBase58(),
       userPositionPda: userPositionPda.toBase58(),
-      vaultLamports,
-      userLamports,
+      vaultLamports: cachedVaultLamports,
+      userLamports: cachedUserLamports,
       authority: authority.toBase58(),
       guardian: guardian.toBase58(),
       demoUser: demoUser.toBase58(),

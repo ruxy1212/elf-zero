@@ -10,3 +10,5 @@ backend/.keys/
 .vite/
 **/.vite/
 **/*.DS_Store
+.audit_history.json
+*.audit_history.json
